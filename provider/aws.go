@@ -455,14 +455,12 @@ func (p *AWSProvider) newChange(action string, ep *endpoint.Endpoint, recordsCac
 			HostedZoneId:         aws.String(canonicalHostedZone(ep.Targets[0])),
 			EvaluateTargetHealth: aws.Bool(evalTargetHealth),
 		}
-	} else if hostedZone := isAWSAlias(ep, recordsCache); hostedZone != "" {
-		for _, zone := range zones {
-			change.ResourceRecordSet.Type = aws.String(route53.RRTypeA)
-			change.ResourceRecordSet.AliasTarget = &route53.AliasTarget{
-				DNSName:              aws.String(ep.Targets[0]),
-				HostedZoneId:         aws.String(cleanZoneID(*zone.Id)),
-				EvaluateTargetHealth: aws.Bool(p.evaluateTargetHealth),
-			}
+	} else if isAWSAlias(ep) {
+		change.ResourceRecordSet.Type = aws.String(route53.RRTypeA)
+		change.ResourceRecordSet.AliasTarget = &route53.AliasTarget{
+			DNSName:              aws.String(ep.Targets[0]),
+			HostedZoneId:         nil, // will be filled in by `changesByZone`
+			EvaluateTargetHealth: aws.Bool(p.evaluateTargetHealth),
 		}
 	} else {
 		change.ResourceRecordSet.Type = aws.String(ep.RecordType)
@@ -581,6 +579,13 @@ func changesByZone(zones map[string]*route53.HostedZone, changeSet []*route53.Ch
 			continue
 		}
 		for _, z := range zones {
+			if c.ResourceRecordSet.AliasTarget != nil && c.ResourceRecordSet.AliasTarget.HostedZoneId == nil {
+				if hostedZoneId := canonicalHostedZone(aws.StringValue(c.ResourceRecordSet.AliasTarget.DNSName)); hostedZoneId == "" {
+					c.ResourceRecordSet.AliasTarget.HostedZoneId = z.Id
+				} else {
+					c.ResourceRecordSet.AliasTarget.HostedZoneId = aws.String(hostedZoneId)
+				}
+			}
 			changes[aws.StringValue(z.Id)] = append(changes[aws.StringValue(z.Id)], c)
 			log.Debugf("Adding %s to zone %s [Id: %s]", hostname, aws.StringValue(z.Name), aws.StringValue(z.Id))
 		}
@@ -636,19 +641,10 @@ func useAlias(ep *endpoint.Endpoint, preferCNAME bool) bool {
 	return false
 }
 
-// isAWSAlias determines if a given hostname belongs to an AWS Alias record by doing an reverse lookup.
-func isAWSAlias(ep *endpoint.Endpoint, addrs []*endpoint.Endpoint) string {
-	if prop, exists := ep.GetProviderSpecificProperty("alias"); ep.RecordType == endpoint.RecordTypeCNAME && exists && prop.Value == "true" {
-		for _, addr := range addrs {
-			if len(ep.Targets) > 0 && addr.DNSName == ep.Targets[0] {
-				if hostedZone := canonicalHostedZone(addr.Targets[0]); hostedZone != "" {
-					return hostedZone
-				}
-
-			}
-		}
-	}
-	return ""
+// isAWSAlias determines if a given hostname should be an alias record
+func isAWSAlias(ep *endpoint.Endpoint) bool {
+	prop, exists := ep.GetProviderSpecificProperty("alias")
+	return ep.RecordType == endpoint.RecordTypeCNAME && exists && prop.Value == "true"
 }
 
 // canonicalHostedZone returns the matching canonical zone for a given hostname.

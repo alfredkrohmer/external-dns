@@ -948,10 +948,10 @@ func TestAWSisAWSAlias(t *testing.T) {
 		target     string
 		recordType string
 		alias      string
-		expected   string
+		expected   bool
 	}{
-		{"bar.example.org", endpoint.RecordTypeCNAME, "true", "Z215JYRZR1TBD5"},
-		{"foo.example.org", endpoint.RecordTypeCNAME, "true", ""},
+		{"bar.example.org", endpoint.RecordTypeCNAME, "true", true},
+		{"foo.example.org", endpoint.RecordTypeCNAME, "false", false},
 	} {
 		ep := &endpoint.Endpoint{
 			Targets:    endpoint.Targets{tc.target},
@@ -963,17 +963,7 @@ func TestAWSisAWSAlias(t *testing.T) {
 				},
 			},
 		}
-		addrs := []*endpoint.Endpoint{
-			{
-				DNSName: "foo.example.org",
-				Targets: endpoint.Targets{"foobar.example.org"},
-			},
-			{
-				DNSName: "bar.example.org",
-				Targets: endpoint.Targets{"bar.eu-central-1.elb.amazonaws.com"},
-			},
-		}
-		assert.Equal(t, tc.expected, isAWSAlias(ep, addrs))
+		assert.Equal(t, tc.expected, isAWSAlias(ep))
 	}
 }
 
